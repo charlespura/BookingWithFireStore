@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Club Victorina — Admin Bookings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500&family=Cinzel:wght@400;500&family=Lato:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --forest: #0d3b2e;
+    --forest-deep: #081f19;
+    --gold: #c9a96e;
+    --gold-light: #e8d4a8;
+    --cream: #f8f3ec;
+    --white: #ffffff;
+    --charcoal: #1a1a1a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Lato', sans-serif;
+    background: var(--charcoal);
+    color: var(--cream);
+    padding: 40px 28px 80px;
+  }
+  .header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid rgba(201,169,110,0.2);
+    padding-bottom: 16px; margin-bottom: 28px;
+  }
+  .title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 36px; font-weight: 300;
+  }
+  .subtitle {
+    font-family: 'Cinzel', serif;
+    font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase;
+    color: var(--gold);
+  }
+  .toolbar { display: flex; gap: 12px; align-items: center; }
+  .btn {
+    font-family: 'Cinzel', serif;
+    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--forest-deep); background: var(--gold);
+    padding: 10px 16px; border: none; cursor: pointer;
+  }
+  .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .status { font-size: 12px; color: rgba(248,243,236,0.6); }
+  .card {
+    background: rgba(8,31,25,0.5);
+    border: 1px solid rgba(201,169,110,0.2);
+    padding: 20px; margin-bottom: 12px;
+  }
+  .row {
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 0.8fr 0.8fr;
+    gap: 12px; align-items: center;
+  }
+  .row.header {
+    font-family: 'Cinzel', serif;
+    font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase;
+    color: var(--gold); background: transparent; border: none;
+  }
+  .cell { font-size: 13px; color: rgba(248,243,236,0.9); }
+  .muted { color: rgba(248,243,236,0.55); font-size: 12px; }
+  .empty { padding: 24px; text-align: center; color: rgba(248,243,236,0.6); }
+  @media (max-width: 900px) {
+    .row { grid-template-columns: 1fr; }
+    .row.header { display: none; }
+    .cell { padding: 4px 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="subtitle">Admin</div>
+      <div class="title">Booking Requests</div>
+    </div>
+    <div class="toolbar">
+      <button id="refreshBtn" class="btn">Refresh</button>
+      <div id="status" class="status">Ready</div>
+    </div>
+  </div>
+
+  <div id="list">
+    <div class="row header">
+      <div>Guest</div>
+      <div>Contact</div>
+      <div>Event</div>
+      <div>Venue</div>
+      <div>Date</div>
+      <div>Guests</div>
+    </div>
+  </div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getFirestore, collection, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyApo7T486mxPBuFFAOTKa13ktiDoz_Ww-4",
+    authDomain: "act1maamrich.firebaseapp.com",
+    projectId: "act1maamrich",
+    storageBucket: "act1maamrich.firebasestorage.app",
+    messagingSenderId: "722768316793",
+    appId: "1:722768316793:web:bcef9477e003349c7807a8",
+    measurementId: "G-JRPXB6C4ZF"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  const listEl = document.getElementById('list');
+  const statusEl = document.getElementById('status');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  function renderEmpty() {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No bookings yet.';
+    listEl.appendChild(empty);
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    return dateStr;
+  }
+
+  function clearRows() {
+    const rows = listEl.querySelectorAll('.card, .empty');
+    rows.forEach(r => r.remove());
+  }
+
+  async function loadBookings() {
+    statusEl.textContent = 'Loading...';
+    refreshBtn.disabled = true;
+    clearRows();
+
+    try {
+      const q = query(collection(db, 'reservations'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        renderEmpty();
+      } else {
+        snap.forEach(doc => {
+          const d = doc.data();
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.innerHTML = `
+            <div class="row">
+              <div class="cell">${d.firstName || ''} ${d.lastName || ''}</div>
+              <div class="cell">
+                <div>${d.email || '—'}</div>
+                <div class="muted">${d.phone || '—'}</div>
+              </div>
+              <div class="cell">${d.eventType || '—'}</div>
+              <div class="cell">${d.venue || '—'}</div>
+              <div class="cell">${formatDate(d.preferredDate)}</div>
+              <div class="cell">${d.guestCount ?? '—'}</div>
+            </div>
+            <div class="muted" style="margin-top:8px;">${d.message ? d.message : ''}</div>
+          `;
+          listEl.appendChild(card);
+        });
+      }
+      statusEl.textContent = 'Loaded';
+    } catch (err) {
+      console.error('Firestore error', err);
+      statusEl.textContent = 'Failed to load';
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Failed to load bookings. Check Firestore rules for read access.';
+      listEl.appendChild(empty);
+    } finally {
+      refreshBtn.disabled = false;
+    }
+  }
+
+  refreshBtn.addEventListener('click', loadBookings);
+  loadBookings();
+</script>
+</body>
+</html>
