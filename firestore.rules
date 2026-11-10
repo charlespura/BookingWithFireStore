@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function admin() {
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function pad(n) { return n < 10 ? '0' + string(n) : string(n); }
+    function localDate(t) {
+      let local = t + duration.value(8, 'h');
+      return string(local.year()) + '-' + pad(local.month()) + '-' + pad(local.day());
+    }
+    function validBooking(d) {
+      return d.keys().hasAll(['firstName','lastName','email','phone','eventType','venue','preferredDate','guestCount','message','consent','status','serviceId','venueId','slotId','startsAt','endsAt','createdAt','timeZone'])
+        && d.keys().hasOnly(['firstName','lastName','email','phone','eventType','venue','preferredDate','guestCount','message','consent','status','serviceId','venueId','slotId','startsAt','endsAt','createdAt','timeZone'])
+        && d.firstName is string && d.firstName.size() > 0 && d.firstName.size() <= 80
+        && d.lastName is string && d.lastName.size() > 0 && d.lastName.size() <= 80
+        && d.email is string && d.email.size() <= 200 && d.email.matches('^[^@ ]+@[^@ ]+[.][^@ ]+$')
+        && d.phone is string && d.phone.matches('^[+0-9][0-9 ()-]{6,19}$')
+        && d.message is string && d.message.size() <= 1500
+        && d.eventType in ['Wedding','Debut / 18th Birthday','Corporate Event','Birthday Celebration','Christmas Party','Other']
+        && d.guestCount is int && d.guestCount >= 1 && d.guestCount <= (d.venueId == 'ballroom' ? 500 : d.venueId == 'garden' ? 300 : 80)
+        && d.venue is string && d.venue == (d.venueId == 'ballroom' ? 'Grand Ballroom' : d.venueId == 'garden' ? 'Garden Pavilion' : 'Salon Privé')
+        && d.consent == true && d.status == 'pending' && d.timeZone == 'Asia/Manila'
+        && d.createdAt == request.time
+        && d.startsAt is timestamp && d.endsAt is timestamp
+        && d.startsAt > request.time && d.startsAt < request.time + duration.value(91, 'd')
+        && d.startsAt.toMillis() % 3600000 == 0
+        && d.venueId in ['ballroom','garden','salon']
+        && d.serviceId is string && d.serviceId.size() <= 100
+        && d.slotId == d.venueId + '_' + string(int(d.startsAt.toMillis() / 1000))
+        && d.preferredDate == localDate(d.startsAt);
+    }
+    function permittedTime(d) {
+      let s = get(/databases/$(database)/documents/services/$(d.serviceId)).data;
+      let settings = get(/databases/$(database)/documents/settings/business).data;
+      let local = d.startsAt + duration.value(8, 'h');
+      let hours = settings.hours[local.dayOfWeek() % 7];
+      return s.active == true && s.venueId == d.venueId
+        && s.duration in [15,30,45,60]
+        && d.endsAt == d.startsAt + duration.value(s.duration, 'm')
+        && settings.published == true && !(d.preferredDate in settings.blockedDates)
+        && hours.closed == false && local.hours() >= hours.open && local.hours() < hours.close;
+    }
+    function matchingSlot(id, d) {
+      let path = /databases/$(database)/documents/slots/$(d.slotId);
+      let slot = getAfter(path).data;
+      return !exists(path) && slot.reservationId == id && slot.venueId == d.venueId
+        && slot.startsAt == d.startsAt && slot.endsAt == d.endsAt;
+    }
+    match /reservations/{id} {
+      allow read: if admin();
+      allow create: if admin() || (validBooking(request.resource.data) && permittedTime(request.resource.data) && matchingSlot(id,request.resource.data));
+      allow update, delete: if admin();
+    }
+    match /slots/{id} {
+      // No contact details are stored in availability documents.
+      allow read: if true;
+      allow create: if admin() || (
+        request.resource.data.keys().hasOnly(['reservationId','venueId','startsAt','endsAt'])
+        && request.resource.data.reservationId is string
+        && !exists(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId))
+        && getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.slotId == id
+        && getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.startsAt == request.resource.data.startsAt
+        && getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.endsAt == request.resource.data.endsAt
+        && getAfter(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.venueId == request.resource.data.venueId
+      );
+      allow update, delete: if admin();
+    }
+    match /services/{id} {
+      allow read: if true;
+      allow write: if admin();
+    }
+    match /settings/{id} {
+      allow read: if id == 'business' || admin();
+      allow write: if admin();
+    }
+    match /admins/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || admin());
+      allow list, write: if admin();
+    }
+  }
+}
